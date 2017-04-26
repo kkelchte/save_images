@@ -9,6 +9,9 @@ from sensor_msgs.msg import Imu
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Empty
 
+import numpy as np
+import copy
+
 import sys, select, tty, os, os.path
 
 # Instantiate CvBridge
@@ -17,14 +20,18 @@ bridge = CvBridge()
 saving_location = '/home/klaas/unknown'
 
 index=0
+# index_depth=0
 last_control=[0,0,0,0,0,0]
 last_imu=[0,0,0]
 last_position=[]
 ready=False
+finished=True
 start_time=0
 delay_evaluation = 3
+rgb_image = None #np.zeros((360,640,3))
+# saving = False # token to avoid overwriting of rgb_image while saving
 
-def write_info():
+def write_info(image_type):
   if not ready or (rospy.get_time()-start_time) < delay_evaluation: return
   with open(saving_location+'/meta_info.txt','a') as metafile:
     metafile.write("{0:010d} {1}\n".format(index, str(last_imu)[1:-1]))
@@ -32,21 +39,50 @@ def write_info():
     controlfile.write("{0:010d} {1[0]} {1[1]} {1[2]} {1[3]} {1[4]} {1[5]}\n".format(index, last_control))
   with open(saving_location+'/position_info.txt','a') as positionfile:
     positionfile.write("{0:010d} {1}\n".format(index, str(last_position)[1:-1]))
+  with open(saving_location+'/images.txt','a') as imagesfile:
+    imagesfile.write("{0}/{1}/{2:010d}.jpg\n".format(saving_location, image_type, index))
+  
   
 def image_callback(msg):
   global index
-  if not ready or (rospy.get_time()-start_time) < delay_evaluation: return
+  if (not ready) or finished or ((rospy.get_time()-start_time) < delay_evaluation): return
   try:
     # Convert your ROS Image message to OpenCV2
-    cv2_img = bridge.imgmsg_to_cv2(msg, "bgr8")
+    rgb_image = bridge.imgmsg_to_cv2(msg, "bgr8")
+    # print('converting image: ',rgb_image)
   except CvBridgeError, e:
     print(e)
   else:
     # Save your OpenCV2 image as a jpeg 
-    print('write image: {:010d}'.format(index))
-    cv2.imwrite(saving_location+"/RGB/{:010d}.jpg".format(index), cv2_img)
-    write_info()
+    print('write RGB image: {:010d}'.format(index))
+    cv2.imwrite(saving_location+"/RGB/{:010d}.jpg".format(index), rgb_image)
+    write_info('RGB')
     index+=1
+
+def depth_callback(data):
+  global index
+  if (not ready) or finished or ((rospy.get_time()-start_time) < delay_evaluation): return
+  try:
+    # Convert your ROS Image message to OpenCV2
+    im = bridge.imgmsg_to_cv2(data, desired_encoding='passthrough')#gets float of 32FC1 depth image
+  except CvBridgeError as e:
+    print(e)
+  else:
+    # shp = im.shape
+    # im=np.asarray([ e*1.0 if not np.isnan(e) else 0 for e in im.flatten()]).reshape(shp)
+    im=im*1/5.*255
+    # alpha = 256/4.6
+    # beta = -2.7*256/4.6+128
+    # im = np.abs(im * alpha + beta)
+    # cv2.convertScaleAbs(im,im2, alpha,beta)
+    # cv2.imshow('depth',im.astype(np.int))
+    # cv2.waitKey(2)
+    # Save your OpenCV2 image as a jpeg 
+    print('write image: {:010d}'.format(index))
+    # cv2.imwrite(saving_location+"/RGB/{:010d}.jpg".format(index), rgb_image)
+    cv2.imwrite(saving_location+"/Depth/{:010d}.jpg".format(index), im.astype(np.int))
+    write_info('Depth')
+    index +=1
 
 def control_callback(data):
   global last_control
@@ -83,14 +119,23 @@ def gt_callback(data):
   last_position=[data.pose.pose.position.x,
 		 data.pose.pose.position.y,
 		 data.pose.pose.position.z]
-  print(last_position)
+  # print(last_position)
   
 def ready_callback(msg):
-  global ready, start_time
-  if not ready:
+  global ready, start_time, finished
+  if not ready and finished:
     ready=True
+    finished = False
     start_time=rospy.get_time()
-    print('evaluate start: ', start_time)
+    # print('evaluate start: ', start_time)
+
+def finished_callback(msg):
+  global ready, start_time, finished
+  if ready and not finished:
+    ready=False
+    finished = True
+    start_time=0
+    # print('evaluate start: ', start_time)
 
 if __name__=="__main__":
   if rospy.has_param('delay_evaluation'):
@@ -105,6 +150,8 @@ if __name__=="__main__":
       saving_location='/home/klaas/pilot_data/'+loc
   if not os.path.exists(saving_location+'/RGB'):
       os.makedirs(saving_location+'/RGB')
+  if not os.path.exists(saving_location+'/Depth'):
+      os.makedirs(saving_location+'/Depth')
   #else:
       #raise IOError('saving folder: '+saving_location+' already exists.')
 
@@ -115,10 +162,12 @@ if __name__=="__main__":
   #rospy.Subscriber('/bebop/odom', Odometry, odometry_callback)
 
   rospy.Subscriber('/ardrone/kinect/image_raw', Image, image_callback)
+  rospy.Subscriber('/ardrone/kinect/depth/image_raw', Image, depth_callback)
   rospy.Subscriber('/ardrone/imu', Imu, imu_callback)
   rospy.Subscriber('/cmd_vel', Twist, control_callback)
   rospy.Subscriber('/ground_truth/state', Odometry, gt_callback)
   rospy.Subscriber('/ready', Empty, ready_callback)
+  rospy.Subscriber('/finished', Empty, finished_callback)
   
   # spin() simply keeps python from exiting until this node is stopped	
   rospy.spin()
