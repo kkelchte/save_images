@@ -2,15 +2,13 @@
 <package>
   <name>create_dataset</name>
   <version>0.6.0</version>
-  <description>Save images with control and imu data.</description>
+  <description>Save images with control, imu and potentially depth data.</description>
 
   <maintainer email="kkelchtermans@gmail.com">Klaas Kelchtermans</maintainer>
 
   <license>BSD</license>
 
-  <url type="website">http://wiki.ros.org/teleop_twist_keyboard</url>
-
-  <author>Graylin Trevor Jay</author>
+  <author>Klaas Kelchtermans</author>
 
   <buildtool_depend>catkin</buildtool_depend>
   <run_depend>geometry_msgs</run_depend>
